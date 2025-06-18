@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -54,6 +55,70 @@ router.put('/avatar', authenticateToken, upload.single('avatar'), async (req, re
   } catch (error) {
     console.error('Update avatar error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete user account
+router.delete('/delete-account', authenticateToken, async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ message: 'Password is required' });
+    }
+
+    // Get user with password
+    const userResult = await pool.query(
+      'SELECT id, password FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Invalid password' });
+    }
+
+    // Start transaction for cascading delete
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Delete in order to respect foreign key constraints
+      // 1. Delete session comments
+      await client.query('DELETE FROM session_comments WHERE user_id = $1', [req.user.id]);
+      
+      // 2. Delete session likes
+      await client.query('DELETE FROM session_likes WHERE user_id = $1', [req.user.id]);
+      
+      // 3. Delete messages (both sent and received)
+      await client.query('DELETE FROM messages WHERE sender_id = $1 OR receiver_id = $1', [req.user.id]);
+      
+      // 4. Delete surf sessions (this will also delete related likes and comments due to CASCADE)
+      await client.query('DELETE FROM surf_sessions WHERE user_id = $1', [req.user.id]);
+      
+      // 5. Finally delete the user
+      await client.query('DELETE FROM users WHERE id = $1', [req.user.id]);
+
+      await client.query('COMMIT');
+
+      res.json({ message: 'Account deleted successfully' });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ message: 'Server error during account deletion' });
   }
 });
 

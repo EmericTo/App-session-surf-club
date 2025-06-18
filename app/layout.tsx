@@ -7,7 +7,7 @@ import { Toaster } from '@/components/ui/sonner';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Surf Sessions - Partagez vos sessions de surf',
+  title: 'Session Surf Club - Partagez vos sessions de surf',
   description: 'Partagez vos sessions de surf avec la communauté',
 };
 

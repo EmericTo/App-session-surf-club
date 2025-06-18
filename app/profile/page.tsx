@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { DeleteConfirmationModal } from '@/components/ui/delete-confirmation-modal';
+import { AccountDeletionModal } from '@/components/ui/account-deletion-modal';
 import { 
   ArrowLeft, 
   Waves, 
@@ -26,7 +27,10 @@ import {
   Upload,
   Send,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Settings,
+  AlertTriangle,
+  Edit
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -83,7 +87,12 @@ export default function ProfilePage() {
     commentId: '',
     isLoading: false
   });
-  const { user, token, updateUser } = useAuth();
+  const [accountDeletionModal, setAccountDeletionModal] = useState<{ isOpen: boolean; isLoading: boolean }>({
+    isOpen: false,
+    isLoading: false
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const { user, token, updateUser, logout } = useAuth();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -357,6 +366,47 @@ export default function ProfilePage() {
     }
   };
 
+  const handleEditSession = (sessionId: string) => {
+    router.push(`/edit-session/${sessionId}`);
+  };
+
+  const openAccountDeletionModal = () => {
+    setAccountDeletionModal({ isOpen: true, isLoading: false });
+    setShowSettings(false);
+  };
+
+  const closeAccountDeletionModal = () => {
+    setAccountDeletionModal({ isOpen: false, isLoading: false });
+  };
+
+  const handleDeleteAccount = async (password: string) => {
+    setAccountDeletionModal(prev => ({ ...prev, isLoading: true }));
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/delete-account', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Erreur lors de la suppression du compte');
+      }
+
+      toast.success('Compte supprimé avec succès');
+      logout();
+      router.push('/');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erreur lors de la suppression du compte');
+      console.error('Delete account error:', error);
+      setAccountDeletionModal(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
   const getWindDirectionText = (direction: string) => {
     const directions: { [key: string]: string } = {
       'N': 'Nord', 'NE': 'Nord-Est', 'E': 'Est', 'SE': 'Sud-Est',
@@ -412,8 +462,34 @@ export default function ProfilePage() {
               />
               <h1 className="text-xl font-semibold text-gray-900">Session Surf Club</h1>
             </div>
-            <div className="text-sm text-gray-600">
-              Mon profil
+            <div className="flex items-center space-x-4">
+              <div className="text-sm text-gray-600">
+                Mon profil
+              </div>
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="text-gray-600 hover:text-gray-900"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+                
+                {showSettings && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                    <div className="py-1">
+                      <button
+                        onClick={openAccountDeletionModal}
+                        className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        <AlertTriangle className="h-4 w-4 mr-2" />
+                        Supprimer le compte
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -527,6 +603,14 @@ export default function ProfilePage() {
                         <p className="text-sm text-gray-500">
                           {format(new Date(session.created_at), 'dd MMMM yyyy', { locale: fr })}
                         </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditSession(session.id)}
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -754,6 +838,23 @@ export default function ProfilePage() {
         onConfirm={handleDeleteComment}
         isLoading={deleteModal.isLoading}
       />
+
+      {/* Account Deletion Modal */}
+      <AccountDeletionModal
+        isOpen={accountDeletionModal.isOpen}
+        onClose={closeAccountDeletionModal}
+        onConfirm={handleDeleteAccount}
+        isLoading={accountDeletionModal.isLoading}
+        username={profile?.username || ''}
+      />
+
+      {/* Click outside to close settings */}
+      {showSettings && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }

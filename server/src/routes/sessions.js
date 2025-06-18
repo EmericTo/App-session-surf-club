@@ -175,6 +175,80 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Update session
+router.put('/:id', authenticateToken, upload.single('image'), [
+  body('title').isLength({ min: 1, max: 100 }).trim(),
+  body('description').optional().isLength({ max: 500 }).trim(),
+  body('location').isLength({ min: 1, max: 100 }).trim(),
+  body('wave_height').isFloat({ min: 0, max: 30 }),
+  body('wave_period').isFloat({ min: 0, max: 30 }),
+  body('wind_speed').isFloat({ min: 0, max: 100 }),
+  body('wind_direction').isIn(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']),
+  body('tide_type').isIn(['low', 'rising', 'high', 'falling']),
+  body('rating').isInt({ min: 1, max: 5 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const sessionId = req.params.id;
+    const {
+      title, description, location, wave_height, wave_period,
+      wind_speed, wind_direction, tide_type, rating, keep_current_image
+    } = req.body;
+
+    // Check if session exists and belongs to user
+    const sessionCheck = await pool.query(
+      'SELECT id, image_url FROM surf_sessions WHERE id = $1 AND user_id = $2',
+      [sessionId, req.user.id]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Session not found or unauthorized' });
+    }
+
+    const currentSession = sessionCheck.rows[0];
+    let imageUrl = currentSession.image_url;
+
+    // Handle image update
+    if (req.file) {
+      // New image uploaded
+      imageUrl = `/uploads/${req.file.filename}`;
+    } else if (keep_current_image === 'false') {
+      // User wants to remove the image
+      imageUrl = null;
+    }
+    // If keep_current_image is 'true' or undefined, keep the current image
+
+    const result = await pool.query(`
+      UPDATE surf_sessions 
+      SET title = $1, description = $2, image_url = $3, location = $4,
+          wave_height = $5, wave_period = $6, wind_speed = $7, wind_direction = $8,
+          tide_type = $9, rating = $10, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $11 AND user_id = $12
+      RETURNING *
+    `, [
+      title, description, imageUrl, location,
+      wave_height, wave_period, wind_speed, wind_direction,
+      tide_type, rating, sessionId, req.user.id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Session not found or unauthorized' });
+    }
+
+    res.json({
+      message: 'Session updated successfully',
+      session: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update session error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Delete session
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
