@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { SearchBar } from '@/components/ui/search-bar';
 import { Input } from '@/components/ui/input';
 import { DeleteConfirmationModal } from '@/components/ui/delete-confirmation-modal';
+import { useUnreadMessages } from '@/hooks/use-unread-messages';
 import { 
   Waves, 
   Wind, 
@@ -26,7 +27,8 @@ import {
   Send,
   ChevronDown,
   ChevronUp,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -66,6 +68,7 @@ interface SurfSession {
 export default function FeedPage() {
   const [sessions, setSessions] = useState<SurfSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedComments, setExpandedComments] = useState<{ [key: string]: boolean }>({});
   const [comments, setComments] = useState<{ [key: string]: Comment[] }>({});
   const [newComments, setNewComments] = useState<{ [key: string]: string }>({});
@@ -77,6 +80,7 @@ export default function FeedPage() {
     isLoading: false
   });
   const { user, token, logout } = useAuth();
+  const { unreadCount } = useUnreadMessages();
   const router = useRouter();
 
   useEffect(() => {
@@ -88,29 +92,51 @@ export default function FeedPage() {
   }, [user, token, router]);
 
   const fetchSessions = async () => {
+    if (!token) {
+      setError('Token manquant');
+      setLoading(false);
+      return;
+    }
+
     try {
+      setError(null);
       const response = await fetch('http://localhost:5000/api/sessions', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
+      if (response.status === 401 || response.status === 403) {
+        // Token expiré ou invalide
+        toast.error('Session expirée, veuillez vous reconnecter');
+        logout();
+        router.push('/auth');
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error('Erreur lors du chargement des sessions');
+        throw new Error(`Erreur ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
       setSessions(data.sessions);
     } catch (error) {
-      toast.error('Erreur lors du chargement des sessions');
       console.error('Fetch sessions error:', error);
+      setError(error instanceof Error ? error.message : 'Erreur lors du chargement des sessions');
+      
+      
+      if (error instanceof Error && error.message.includes('fetch')) {
+        toast.error('Erreur de connexion au serveur.');
+      } else {
+        toast.error('Erreur lors du chargement des sessions');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const fetchComments = async (sessionId: string) => {
-    if (loadingComments[sessionId]) return;
+    if (loadingComments[sessionId] || !token) return;
     
     setLoadingComments(prev => ({ ...prev, [sessionId]: true }));
     
@@ -120,6 +146,13 @@ export default function FeedPage() {
           'Authorization': `Bearer ${token}`,
         },
       });
+
+      if (response.status === 401 || response.status === 403) {
+        toast.error('Session expirée, veuillez vous reconnecter');
+        logout();
+        router.push('/auth');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error('Erreur lors du chargement des commentaires');
@@ -150,7 +183,7 @@ export default function FeedPage() {
 
   const handleAddComment = async (sessionId: string) => {
     const content = newComments[sessionId]?.trim();
-    if (!content) return;
+    if (!content || !token) return;
 
     try {
       const response = await fetch(`http://localhost:5000/api/comments/session/${sessionId}`, {
@@ -161,6 +194,13 @@ export default function FeedPage() {
         },
         body: JSON.stringify({ content }),
       });
+
+      if (response.status === 401 || response.status === 403) {
+        toast.error('Session expirée, veuillez vous reconnecter');
+        logout();
+        router.push('/auth');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error('Erreur lors de l\'ajout du commentaire');
@@ -215,6 +255,8 @@ export default function FeedPage() {
   const handleDeleteComment = async () => {
     const { sessionId, commentId } = deleteModal;
     
+    if (!token) return;
+    
     setDeleteModal(prev => ({ ...prev, isLoading: true }));
 
     try {
@@ -224,6 +266,13 @@ export default function FeedPage() {
           'Authorization': `Bearer ${token}`,
         },
       });
+
+      if (response.status === 401 || response.status === 403) {
+        toast.error('Session expirée, veuillez vous reconnecter');
+        logout();
+        router.push('/auth');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error('Erreur lors de la suppression du commentaire');
@@ -253,6 +302,8 @@ export default function FeedPage() {
   };
 
   const handleLike = async (sessionId: string) => {
+    if (!token) return;
+
     try {
       const response = await fetch(`http://localhost:5000/api/likes/session/${sessionId}`, {
         method: 'POST',
@@ -260,6 +311,13 @@ export default function FeedPage() {
           'Authorization': `Bearer ${token}`,
         },
       });
+
+      if (response.status === 401 || response.status === 403) {
+        toast.error('Session expirée, veuillez vous reconnecter');
+        logout();
+        router.push('/auth');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error('Erreur lors du like');
@@ -314,10 +372,74 @@ export default function FeedPage() {
     router.push(`/user/${userId}`);
   };
 
+  const handleRetry = () => {
+    setLoading(true);
+    setError(null);
+    fetchSessions();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center h-16">
+              <div className="flex items-center space-x-4">
+                <Image
+                  src="/logo.png"
+                  alt="Session Surf Club"
+                  width={48}
+                  height={48}
+                  className="rounded-full"
+                />
+                <h1 className="text-2xl font-bold text-gray-900">Session Surf Club</h1>
+              </div>
+              
+              <nav className="flex items-center space-x-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleLogout}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Déconnexion
+                </Button>
+              </nav>
+            </div>
+          </div>
+        </header>
+
+        {/* Error Content */}
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <Card>
+            <CardContent className="text-center py-12">
+              <div className="text-red-500 mb-4">
+                <Waves className="h-16 w-16 mx-auto mb-4" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Erreur de chargement</h3>
+              <p className="text-gray-600 mb-6">{error}</p>
+              <div className="space-x-4">
+                <Button onClick={handleRetry} className="bg-blue-600 hover:bg-blue-700">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Réessayer
+                </Button>
+                <Button variant="outline" onClick={() => router.push('/auth')}>
+                  Se reconnecter
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </main>
       </div>
     );
   }
@@ -354,14 +476,24 @@ export default function FeedPage() {
                 <Plus className="h-4 w-4 mr-2" />
                 Nouvelle session
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => router.push('/messages')}
-              >
-                <MessageCircle className="h-4 w-4 mr-2" />
-                Messages
-              </Button>
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => router.push('/messages')}
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Messages
+                </Button>
+                {unreadCount > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center text-xs p-0 min-w-[20px]"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Badge>
+                )}
+              </div>
               <Button
                 variant="ghost"
                 size="sm"

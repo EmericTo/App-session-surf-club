@@ -8,13 +8,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Waves } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Waves, Mail, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import Image from 'next/image';
 
 export default function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
+  const [showVerificationAlert, setShowVerificationAlert] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
+  const [resendingVerification, setResendingVerification] = useState(false);
   const { login, register, user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,6 +39,7 @@ export default function AuthPage() {
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
+    setShowVerificationAlert(false);
 
     const formData = new FormData(e.currentTarget);
     const email = formData.get('email') as string;
@@ -44,8 +49,14 @@ export default function AuthPage() {
       await login(email, password);
       toast.success('Connexion réussie !');
       router.push('/feed');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erreur de connexion');
+    } catch (error: any) {
+      if (error.message?.includes('verify your email')) {
+        setShowVerificationAlert(true);
+        setUserEmail(email);
+        toast.error('Veuillez vérifier votre email avant de vous connecter');
+      } else {
+        toast.error(error instanceof Error ? error.message : 'Erreur de connexion');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -69,12 +80,41 @@ export default function AuthPage() {
 
     try {
       await register(email, username, password);
-      toast.success('Compte créé avec succès !');
-      router.push('/feed');
+      toast.success('Compte créé ! Vérifiez votre email pour l\'activer.');
+      setShowVerificationAlert(true);
+      setUserEmail(email);
+      setActiveTab('login');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erreur lors de la création du compte');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!userEmail) return;
+    
+    setResendingVerification(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/resend-verification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: userEmail }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast.success('Email de vérification renvoyé !');
+      } else {
+        toast.error(data.message || 'Erreur lors du renvoi');
+      }
+    } catch (error) {
+      toast.error('Erreur de connexion au serveur');
+    } finally {
+      setResendingVerification(false);
     }
   };
 
@@ -107,6 +147,28 @@ export default function AuthPage() {
             </div>
             <p className="text-white/80">Rejoignez la communauté des surfeurs</p>
           </div>
+
+          {/* Verification Alert */}
+          {showVerificationAlert && (
+            <Alert className="mb-6 bg-orange-50 border-orange-200">
+              <AlertCircle className="h-4 w-4 text-orange-600" />
+              <AlertDescription className="text-orange-800">
+                <div className="space-y-2">
+                  <p>Votre compte nécessite une vérification par email.</p>
+                  <p className="text-sm">Vérifiez votre boîte de réception et vos spams.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResendVerification}
+                    disabled={resendingVerification}
+                    className="mt-2 text-orange-700 border-orange-300 hover:bg-orange-100"
+                  >
+                    {resendingVerification ? 'Envoi...' : 'Renvoyer l\'email'}
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
           <Card className="bg-white/95 backdrop-blur-sm border-white/20">
             <CardHeader>
@@ -149,6 +211,16 @@ export default function AuthPage() {
                         required
                       />
                     </div>
+                    <div className="text-right">
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="text-sm text-blue-600 hover:text-blue-700 p-0"
+                        onClick={() => router.push('/forgot-password')}
+                      >
+                        Mot de passe oublié ?
+                      </Button>
+                    </div>
                     <Button 
                       type="submit" 
                       className="w-full bg-blue-600 hover:bg-blue-700"
@@ -189,6 +261,7 @@ export default function AuthPage() {
                         type="password"
                         placeholder="••••••••"
                         required
+                        minLength={6}
                       />
                     </div>
                     <div className="space-y-2">
@@ -199,6 +272,7 @@ export default function AuthPage() {
                         type="password"
                         placeholder="••••••••"
                         required
+                        minLength={6}
                       />
                     </div>
                     <Button 

@@ -5,6 +5,23 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Get unread messages count
+router.get('/unread-count', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND read_at IS NULL',
+      [req.user.id]
+    );
+
+    const unreadCount = parseInt(result.rows[0].count);
+
+    res.json({ unreadCount });
+  } catch (error) {
+    console.error('Get unread count error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get conversations
 router.get('/conversations', authenticateToken, async (req, res) => {
   try {
